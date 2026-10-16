@@ -33,3 +33,27 @@ Short log of how this fork was built. Newest entries at the bottom.
   mirroring the inbound side.
 - `test/fakes.ts` mocks discord.js and the MCP SDK with `mock.module`, so
   `server.ts` is imported for real in `test/server.test.ts`.
+
+## feat/policy-engine
+
+- Policy is data: `roles` and `categories` are open maps. A new role or a
+  new connector is a JSON edit; a new shell program needs an analyser in
+  code (`lib/shell.ts`), because a command line cannot be judged by name.
+- Category decisions: `allow`, `deny`, `owner`, `worktree`, `allowlist`.
+  Categories match tool names by glob, first match in file order wins, so
+  `figma-bridge-destructive` sits above `figma-bridge`.
+- Shell analyser denies anything it cannot reduce to plain argument lists:
+  `$(...)`, backticks, subshells, here-docs, redirection to files, env
+  assignments, a variable as program name. Unknown git subcommands are
+  denied because aliases can run arbitrary commands.
+- Force-push/delete is checked against `sharedBranches`; with no refspec the
+  current branch is read from `.git/HEAD` (worktree `gitdir:` files are
+  followed) without spawning git.
+- "Isolated worktree" = path under `worktreeRoots` (default
+  `**/.claude/worktrees/*`, `**/.worktrees/*`). Installs/tests also require
+  that no secret-looking variable is in the environment the hook sees (the
+  same environment the Bash tool inherits) and no `.env` file at the
+  worktree top. This is a path rule, not a sandbox (see README limits).
+- Guards for every role, board and owner included: no writes to settings,
+  plugin and channel-state files; shell commands mentioning them are denied.
+- Unknown role names resolve to `none` (lowest tier).
