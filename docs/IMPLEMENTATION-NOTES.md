@@ -75,3 +75,25 @@ Short log of how this fork was built. Newest entries at the bottom.
   created, so they do not count against limits.
 - Policy file invalid: nothing is delivered (fail closed), error on stderr
   and in the audit log.
+
+## feat/pretooluse-hook
+
+- Hook input has `agent_id` only inside sub-agents (checked in the Claude
+  Code 2.1.x hook schema). Sub-agent transcripts live at
+  `<project>/<session_id>/subagents/agent-<agent_id>.jsonl`; the first user
+  entry is the prompt written by the parent, where the marker must be.
+- Prompts are told apart by `origin.kind` on transcript `user` entries:
+  `channel`, `human`, `task-notification`, others. Only `human` counts as the
+  operator. Unknown kinds (scheduled prompts etc.) are trusted only through
+  a marker.
+- Main thread on a Discord turn = lowest role among open requests. This is
+  the price of one shared session: concurrent requests from different
+  people can only get different roles in different sub-agents.
+- Markers inside a Discord message body are ignored (only the tag's
+  `request_id` attribute counts), so quoting someone else's marker does not
+  lift a role.
+- The transcript is scanned incrementally (byte offset cached per session in
+  `hook-cache/`), so a long session costs only the new tail per call.
+- The hook never outputs "allow"; it denies or stays silent. Errors deny.
+- Hook uses `os.homedir()`, not `$HOME`: Git Bash on Windows sets
+  `HOME=/c/Users/...`, which would not match native paths.
