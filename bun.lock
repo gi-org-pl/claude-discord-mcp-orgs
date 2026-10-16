@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "claude-channel-discord",
+      "name": "claude-discord-mcp-orgs",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.0.0",
         "discord.js": "^14.14.0",

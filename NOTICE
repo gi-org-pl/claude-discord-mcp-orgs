@@ -1,0 +1,13 @@
+claude-discord-mcp-orgs
+Copyright 2026 Fundacja Generacja Innowacja and contributors
+
+This product is a modified version of the Discord channel plugin for
+Claude Code ("discord" 0.0.4 from the claude-plugins-official marketplace),
+licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The first commit of this repository contains the upstream files unchanged.
+Every later change is a separate, reviewable commit. In summary, the
+modifications are:
+
+- Shared state helpers and an append-only JSONL audit log (lib/state.ts,
+  lib/audit.ts).
