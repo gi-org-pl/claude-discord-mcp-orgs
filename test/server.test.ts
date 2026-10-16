@@ -44,7 +44,7 @@ beforeAll(async () => {
 beforeEach(() => {
   fakes.mcp!.notifications.length = 0
   writeAccess()
-  if (existsSync(join(dir, 'audit.jsonl'))) rmSync(join(dir, 'audit.jsonl'))
+  for (const f of ['audit.jsonl', 'requests.json']) if (existsSync(join(dir, f))) rmSync(join(dir, f))
 })
 
 describe('inbound gate with roles', () => {
@@ -105,5 +105,49 @@ describe('inbound gate with roles', () => {
     const res = await fakes.mcp!.callTool('reply', { chat_id: ch.id, text: 'hi' })
     expect(res.isError).toBeUndefined()
     expect(ch.sent).toHaveLength(1)
+  })
+})
+
+describe('request binding and limits', () => {
+  const reqFile = () => join(dir, 'requests.json')
+  beforeEach(() => { if (existsSync(reqFile())) rmSync(reqFile()) })
+
+  test('each delivered message gets a request id recorded with the requester', async () => {
+    const dm = new FakeChannel('dm-1', ChannelType.DM, null, null, BOARD)
+    await fakes.client!.emit('messageCreate', fakeMessage({ author: BOARD, channel: dm }))
+    const meta = inbound()[0].params.meta
+    expect(meta.request_id).toMatch(/^dr_[0-9a-f]{16}$/)
+    const state = JSON.parse(readFileSync(reqFile(), 'utf8'))
+    expect(state.requests[meta.request_id]).toMatchObject({ requester_id: BOARD, role: 'board', owner: true, chat_id: 'dm-1' })
+  })
+
+  test('heads concurrency limit (2) drops the third message until one ends', async () => {
+    const ch = new FakeChannel('c-lim', ChannelType.GuildText, GUILD)
+    for (let i = 0; i < 3; i++) await fakes.client!.emit('messageCreate', fakeMessage({ author: HEADS, channel: ch, mentioned: true }))
+    expect(inbound()).toHaveLength(2)
+    const res = await fakes.mcp!.callTool('end_request', { request_id: inbound()[0].params.meta.request_id })
+    expect(res.content[0].text).toStartWith('ended')
+    const m = fakeMessage({ author: HEADS, channel: ch, mentioned: true })
+    await fakes.client!.emit('messageCreate', m)
+    expect(inbound()).toHaveLength(3)
+  })
+
+  test('an unknown role name is treated as no role', async () => {
+    writeAccess({ members: { [BOARD]: { role: 'superuser' } } })
+    const dm = new FakeChannel('dm-1', ChannelType.DM, null, null, BOARD)
+    await fakes.client!.emit('messageCreate', fakeMessage({ author: BOARD, channel: dm }))
+    expect(inbound()).toHaveLength(0)
+  })
+
+  test('replies never carry request ids', async () => {
+    const ch = new FakeChannel('scrub', ChannelType.GuildText, GUILD)
+    fakes.client!.channelsById.set(ch.id, ch)
+    await fakes.mcp!.callTool('reply', { chat_id: ch.id, text: 'id dr_0123456789abcdef here' })
+    expect(ch.sent[0].content).toBe('id [request] here')
+  })
+
+  test('end_request is listed as a tool', async () => {
+    const { tools } = await fakes.mcp!.listTools()
+    expect(tools.map((t: any) => t.name)).toContain('end_request')
   })
 })
