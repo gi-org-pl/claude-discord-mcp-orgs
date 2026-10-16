@@ -44,6 +44,7 @@ import {
 import { appendAudit } from './lib/audit.ts'
 import { statePaths } from './lib/state.ts'
 import { type Policy, loadPolicy, NONE_ROLE } from './lib/policy.ts'
+import { decideEscalation, markNotified, readEscalation, unnotified } from './lib/escalations.ts'
 import {
   checkLimits,
   endRequest,
@@ -284,6 +285,112 @@ function checkApprovals(): void {
 }
 
 if (!STATIC) setInterval(checkApprovals, 5000).unref()
+
+// Escalations: the PreToolUse hook writes escalations/<id>.json when it
+// denies a call that the requester's role may get approved once. Send each
+// new one to the approvers (roles with approvesEscalations, global role
+// only) as a DM with Approve / Deny buttons.
+function approverIds(access: Access, policy: Policy): string[] {
+  return Object.entries(access.members)
+    .filter(([, m]) => !!m.role && policy.roles[m.role]?.approvesEscalations === true)
+    .map(([id]) => id)
+}
+
+const FENCE = '`'.repeat(3)
+
+export function checkEscalations(): void {
+  const pending = unnotified(PATHS.escalations)
+  if (pending.length === 0) return
+  let policy: Policy
+  try { policy = loadPolicy(PATHS.policy) } catch { return }
+  const access = loadAccess()
+  for (const e of pending) {
+    // Mark first so a slow send can never post the same escalation twice.
+    markNotified(PATHS.escalations, e, Date.now())
+    const to = approverIds(access, policy).filter(id => id !== e.requester_id)
+    appendAudit(PATHS.audit, {
+      event: 'escalation', escalation_id: e.id, request_id: e.request_id, requester_id: e.requester_id,
+      role: e.role, channel: e.chat_id, tool: e.tool, decision: to.length ? 'sent' : 'no_approvers',
+      reason: e.reason, approvers: to.join(','),
+    })
+    const text =
+      `🔓 Approval needed (once)\n` +
+      `Requester: <@${e.requester_id}> (role ${e.role}) in <#${e.chat_id}>\n` +
+      `Tool: ${e.tool}\nWhy it was denied: ${e.reason}\n` +
+      `Input: ${FENCE}${e.input_preview.replace(/`/g, "'")}${FENCE}`
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`esc:allow:${e.id}`).setLabel('Approve once').setEmoji('✅').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`esc:deny:${e.id}`).setLabel('Deny').setEmoji('❌').setStyle(ButtonStyle.Danger),
+    )
+    for (const userId of to) {
+      void (async () => {
+        try {
+          const user = await client.users.fetch(userId)
+          await user.send({ content: scrubRequestIds(text).slice(0, MAX_CHUNK_LIMIT), components: [row] })
+        } catch (err) {
+          process.stderr.write(`discord channel: escalation send to ${userId} failed: ${err}\n`)
+        }
+      })()
+    }
+  }
+}
+
+setInterval(checkEscalations, 3000).unref()
+
+type ButtonLike = {
+  user: { id: string }
+  message: { content: string }
+  reply(p: unknown): Promise<unknown>
+  update(p: unknown): Promise<unknown>
+}
+
+export async function handleEscalationButton(interaction: ButtonLike, behavior: string, id: string): Promise<void> {
+  const access = loadAccess()
+  let policy: Policy
+  try { policy = loadPolicy(PATHS.policy) } catch {
+    await interaction.reply({ content: 'Policy is invalid; nothing decided.', ephemeral: true }).catch(() => {})
+    return
+  }
+  const by = interaction.user.id
+  const current = readEscalation(PATHS.escalations, id)
+  if (!approverIds(access, policy).includes(by) || current?.requester_id === by) {
+    await interaction.reply({ content: 'Not authorized to decide this.', ephemeral: true }).catch(() => {})
+    return
+  }
+  const decided = decideEscalation(PATHS.escalations, id, behavior === 'allow', by, Date.now())
+  if (!decided) {
+    const who = current?.decided_by ? ` by <@${current.decided_by}>` : ''
+    await interaction.reply({ content: `Already decided${who} (${current?.status ?? 'unknown'}).`, ephemeral: true }).catch(() => {})
+    return
+  }
+  appendAudit(PATHS.audit, {
+    event: 'escalation', escalation_id: id, request_id: decided.request_id, requester_id: decided.requester_id,
+    role: decided.role, channel: decided.chat_id, tool: decided.tool,
+    decision: decided.status, decided_by: by,
+  })
+  const label = decided.status === 'approved' ? '✅ Approved once' : '❌ Denied'
+  await interaction
+    .update({ content: `${interaction.message.content}\n\n${label} by <@${by}>`, components: [] })
+    .catch(() => {})
+  // Tell the session, bound to the original request (and its role).
+  void mcp.notification({
+    method: 'notifications/claude/channel',
+    params: {
+      content: decided.status === 'approved'
+        ? `Escalation ${id} (${decided.tool}) was approved once by an approver. Retry the identical call now; it is allowed one time.`
+        : `Escalation ${id} (${decided.tool}) was denied by an approver. Tell the requester it cannot be done under their role.`,
+      meta: {
+        chat_id: decided.chat_id,
+        user: 'escalation',
+        user_id: by,
+        ts: new Date().toISOString(),
+        role: decided.role,
+        request_id: decided.request_id,
+        escalation_id: id,
+      },
+    },
+  }).catch(() => {})
+}
 
 // Discord caps messages at 2000 chars (hard limit — larger sends reject).
 // Split long replies, preferring paragraph boundaries when chunkMode is
@@ -689,6 +796,8 @@ client.on('error', err => {
 // Security mirrors the text-reply path: allowFrom must contain the sender.
 client.on('interactionCreate', async (interaction: Interaction) => {
   if (!interaction.isButton()) return
+  const esc = /^esc:(allow|deny):(e_[0-9a-f]{10})$/.exec(interaction.customId)
+  if (esc) return handleEscalationButton(interaction, esc[1]!, esc[2]!)
   const m = /^perm:(allow|deny|more):([a-km-z]{5})$/.exec(interaction.customId)
   if (!m) return
   const access = loadAccess()

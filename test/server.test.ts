@@ -6,7 +6,8 @@ import { beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { installFakes, fakes, fakeMessage, FakeChannel, ChannelType } from './fakes'
+import { installFakes, fakes, fakeMessage, fakeButton, FakeChannel, ChannelType } from './fakes'
+import { escalate, readEscalation } from '../lib/escalations'
 
 const dir = mkdtempSync(join(tmpdir(), 'dmo-server-'))
 process.env.DISCORD_STATE_DIR = dir
@@ -31,6 +32,8 @@ function writeAccess(extra: Record<string, unknown> = {}) {
   }))
 }
 
+let server: any
+
 function inbound() {
   return fakes.mcp!.notifications.filter(n => n.method === 'notifications/claude/channel')
 }
@@ -38,7 +41,7 @@ function inbound() {
 beforeAll(async () => {
   installFakes()
   writeAccess()
-  await import('../server.ts')
+  server = await import('../server.ts')
 })
 
 beforeEach(() => {
@@ -149,5 +152,52 @@ describe('request binding and limits', () => {
   test('end_request is listed as a tool', async () => {
     const { tools } = await fakes.mcp!.listTools()
     expect(tools.map((t: any) => t.name)).toContain('end_request')
+  })
+})
+
+describe('escalation', () => {
+  const escDir = join(dir, 'escalations')
+  function openEscalation() {
+    const r = escalate(escDir, {
+      request_id: 'dr_bbbbbbbbbbbbbbbb', requester_id: HEADS, role: 'heads', chat_id: 'chan-h',
+      tool: 'mcp__claude_ai_Google_Drive__search_files', input: { query: 'budget' }, reason: '"google-workspace" is not allowed for role heads',
+    }, Date.now())
+    if (r.kind !== 'pending') throw new Error('expected pending')
+    return r.esc
+  }
+
+  test('a new escalation is sent once, as buttons, to approvers only', async () => {
+    const e = openEscalation()
+    const before = fakes.client!.userFor(BOARD).sent.length
+    server.checkEscalations()
+    server.checkEscalations()
+    await new Promise(r => setTimeout(r, 5))
+    const sent = fakes.client!.userFor(BOARD).sent.slice(before)
+    expect(sent).toHaveLength(1)
+    expect(sent[0].content).toContain('Approval needed')
+    expect(sent[0].components[0].components.map((b: any) => b.data.custom_id)).toEqual([`esc:allow:${e.id}`, `esc:deny:${e.id}`])
+    expect(fakes.client!.userFor(HEADS).sent).toHaveLength(0)
+  })
+
+  test('only an approver may decide; the decision is recorded and reported to the session', async () => {
+    const e = openEscalation()
+    const byHeads = fakeButton(`esc:allow:${e.id}`, HEADS)
+    await fakes.client!.emit('interactionCreate', byHeads)
+    expect(byHeads.replies[0].content).toContain('Not authorized')
+    expect(readEscalation(escDir, e.id)!.status).toBe('pending')
+
+    const byBoard = fakeButton(`esc:allow:${e.id}`, BOARD)
+    await fakes.client!.emit('interactionCreate', byBoard)
+    const after = readEscalation(escDir, e.id)!
+    expect(after).toMatchObject({ status: 'approved', decided_by: BOARD })
+    expect(byBoard.updates[0].components).toEqual([])
+    const n = inbound().at(-1)
+    expect(n.params.meta).toMatchObject({ request_id: 'dr_bbbbbbbbbbbbbbbb', role: 'heads', escalation_id: e.id })
+    const audit = readFileSync(join(dir, 'audit.jsonl'), 'utf8')
+    expect(audit).toContain('"decision":"approved"')
+
+    const again = fakeButton(`esc:deny:${e.id}`, BOARD)
+    await fakes.client!.emit('interactionCreate', again)
+    expect(again.replies[0].content).toContain('Already decided')
   })
 })
