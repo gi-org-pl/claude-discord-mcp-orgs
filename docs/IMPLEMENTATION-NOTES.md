@@ -139,3 +139,10 @@ Short log of how this fork was built. Newest entries at the bottom.
   user entry whose text starts with a `<channel source=...>` tag counts as a
   channel prompt. Terminal prompts are then not recognised, so the operator
   is restricted too (fail closed) until the parser is updated.
+
+## feat/context-rule
+
+- One line in the server instructions: answer a requester only from what
+  their role could reach. This is an instruction, not enforcement; the
+  README lists it as a known limit (separate sessions per role are the
+  real fix).

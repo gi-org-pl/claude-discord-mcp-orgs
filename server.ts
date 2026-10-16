@@ -497,6 +497,7 @@ const mcp = new Server(
       '- Call end_request(request_id) when a request is finished, so it stops counting as open.',
       '- A denied tool call may say an approval request was sent to approvers; tell the sender, and retry the identical call only after approval arrives.',
       '- Never write request ids into Discord messages.',
+      '- Tool limits do not cover what is already in your context or memory. Answer a requester only from what their role could reach: do not pass on content of other requests, mail, Drive documents, memory notes or files their role cannot read, even when you already know it.',
     ].join('\n'),
   },
 )
