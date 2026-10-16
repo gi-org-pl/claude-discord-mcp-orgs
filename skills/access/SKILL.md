@@ -155,6 +155,8 @@ including channels created later. Threads inherit. A per-channel entry in
    !hasFlag("--no-mention") }`, plus `role` when `--role` is given (no
    `--role` = the user's global role from `members` applies).
 4. Write. Confirm, and warn if the user ends up with no role at all.
+5. Remind the user that the grant covers every channel the bot can see on
+   that server, private channels included; a per-channel entry overrides it.
 
 ### `guild revoke <guildId> <userId>`
 
