@@ -73,9 +73,14 @@ export function entryText(entry: any): string {
 /** Classify one transcript entry; null = not a prompt. */
 export function classify(entry: any): PromptInfo | null {
   if (!entry || entry.type !== 'user') return null
-  const kind = entry.origin?.kind
-  if (!kind || kind === 'task-notification') return null
   const text = entryText(entry)
+  let kind = entry.origin?.kind
+  // Fallback if a future Claude Code version drops origin: a prompt that
+  // starts with a channel tag is still a channel prompt. Without this the
+  // hook would see no channel messages and stop enforcing (fail open).
+  // Unmarked human prompts are then not recognised, which fails closed.
+  if (!kind && channelAttrs(text)?.source) kind = 'channel'
+  if (!kind || kind === 'task-notification') return null
   if (kind === 'human') return { kind: 'human', markers: markersIn(text) }
   if (kind === 'channel') {
     const attrs = channelAttrs(text) ?? {}
