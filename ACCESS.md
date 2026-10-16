@@ -110,6 +110,7 @@ created later; threads inherit.
 - `--role` sets the user's role inside that guild. Without it the global role
   from `role set` applies.
 - `--no-mention` lets the user trigger the bot without an @mention.
+- Scope: the grant covers **every channel the bot can see** on that server, private channels and threads included, now and in the future. If a private channel must stay out of reach, add a per-channel entry for it (`group add <channelId> --allow <ids>`) or remove the bot from that channel in Discord.
 - A per-channel entry (`group add`) overrides the guild rule for that channel:
   if the channel has an entry, only that entry decides who may write there.
 - Role resolution, most specific first: channel `roles` override, guild
