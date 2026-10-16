@@ -24,3 +24,6 @@ modifications are:
 - A PreToolUse hook (hooks/pretooluse.ts, lib/hook.ts, lib/transcript.ts)
   that resolves the request a tool call serves (main thread, sub-agents via
   request markers, scheduled prompts) and denies calls outside its role.
+- Escalation: a denied call can be approved once by an approver via Discord
+  buttons; requests, decisions and single use are recorded
+  (lib/escalations.ts).

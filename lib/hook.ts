@@ -25,6 +25,7 @@ import { type AuditEntry } from './audit.ts'
 import { type Policy, evaluate, loadPolicy, minRole, roleDef, type Verdict } from './policy.ts'
 import { isActive, loadRequests, markersIn, marker, type RequestRecord, type RequestState } from './requests.ts'
 import { readJson, statePaths, type StatePaths } from './state.ts'
+import { escalate } from './escalations.ts'
 import { agentMarkers, loadScan, saveScan, scanTranscript, transcriptPaths, type ScanState } from './transcript.ts'
 
 export type HookInput = {
@@ -199,10 +200,39 @@ export function decide(input: HookInput, deps: HookDeps): HookResult {
     reason += ' (main thread runs with the lowest role among open requests; delegate to a sub-agent with the request marker, or end finished requests with end_request)'
   }
   const result: HookResult = { output: denyOutput(reason), audit: { ...audit, reason } }
-  if (verdict.escalatable && ctx.requests.length === 1 && !ctx.forcedNone) {
-    result.escalation = { request: ctx.requests[0]!, verdict }
+  if (!(verdict.escalatable && ctx.requests.length === 1 && !ctx.forcedNone)) return result
+
+  // Escalation: one-time approval by an approver role (see lib/escalations.ts).
+  const request = ctx.requests[0]!
+  result.escalation = { request, verdict }
+  const esc = escalate(paths.escalations, {
+    request_id: request.id,
+    requester_id: request.requester_id,
+    role: eff.role,
+    chat_id: request.chat_id,
+    tool,
+    input: toolInput,
+    reason: verdict.reason,
+  }, deps.now)
+  switch (esc.kind) {
+    case 'approved':
+      return {
+        output: null,
+        audit: { ...audit, decision: 'allow', reason: `approved once by ${esc.esc.decided_by} (escalation ${esc.esc.id})`, escalation_id: esc.esc.id },
+      }
+    case 'pending': {
+      const why = `${reason}. ${esc.created ? 'Sent' : 'Already sent'} to approvers for a one-time approval (escalation ${esc.esc.id}); tell the requester, and retry the identical call only after it is approved`
+      return { output: denyOutput(why), audit: { ...audit, reason: why, escalation_id: esc.esc.id }, escalation: result.escalation }
+    }
+    case 'denied': {
+      const why = `${reason}. An approver already declined this call (escalation ${esc.esc.id})`
+      return { output: denyOutput(why), audit: { ...audit, reason: why, escalation_id: esc.esc.id } }
+    }
+    case 'capped': {
+      const why = `${reason}. Too many approval requests are already waiting for this request`
+      return { output: denyOutput(why), audit: { ...audit, reason: why } }
+    }
   }
-  return result
 }
 
 export function installDirOf(hookFile: string): string {

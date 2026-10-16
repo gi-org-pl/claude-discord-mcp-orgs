@@ -233,3 +233,18 @@ Built-in roles:
 Every Discord-originated role, board and owner included, is denied writes to
 settings, plugin and channel-state files and shell commands mentioning them:
 access changes only from the terminal.
+
+## Escalation
+
+When the hook denies a call that the requester's role may have approved
+(`escalate: true` on the role, and the category not marked
+`"escalate": false` - mail never is), it writes `escalations/<id>.json` and
+the channel server DMs every member whose **global** role has
+`approvesEscalations` (default: `board`), except the requester, with
+**Approve once** / **Deny** buttons. The decision is recorded in the file and
+in the audit log, and the session gets a channel message bound to the
+original request. After approval the identical call (same request, tool and
+input; `description`/`timeout` ignored) passes once within one hour. Owner-only
+denials, protected files, Discord channel restrictions and calls from the
+main thread with several open requests are not escalated. At most five
+approval requests wait per request.

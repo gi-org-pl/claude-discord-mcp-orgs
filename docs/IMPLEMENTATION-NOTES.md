@@ -97,3 +97,19 @@ Short log of how this fork was built. Newest entries at the bottom.
 - The hook never outputs "allow"; it denies or stays silent. Errors deny.
 - Hook uses `os.homedir()`, not `$HOME`: Git Bash on Windows sets
   `HOME=/c/Users/...`, which would not match native paths.
+
+## feat/escalation
+
+- File per escalation, written by the hook (create, consume) and the server
+  (notified, decided). No shared mutable file, so no lock is needed.
+- The approval is bound to (request id, sha256 of tool + input without
+  `description`/`timeout`/`run_in_background`) and expires after one hour
+  unused. One approval = one call.
+- Approvers come from global roles only (`members`), not guild grants, so a
+  guild-scoped grant cannot make someone an approver.
+- The requester cannot approve their own escalation even if they are an
+  approver (they would not have been denied as board anyway, but a
+  role can be both `escalate` and `approvesEscalations` in a custom policy).
+- The decision is fed back to the session as a channel notification with the
+  original request id and role, so the model knows to retry or to tell the
+  requester. Message text cannot fake an approval: the hook checks the file.

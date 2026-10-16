@@ -65,6 +65,7 @@ beforeEach(() => {
   writeFileSync(tpath(), '')
   writeState({ [A]: req(A, BOARD, 'board'), [B]: req(B, HEADS, 'heads') })
   if (existsSync(join(stateDir, 'policy.json'))) rmSync(join(stateDir, 'policy.json'))
+  rmSync(join(stateDir, 'escalations'), { recursive: true, force: true })
 })
 
 describe('sessions without channel messages', () => {
@@ -226,4 +227,37 @@ test('incremental scan picks up new lines between calls', () => {
   expect(denied(call(DRIVE))).toBe(false)
   channelPrompt(B, HEADS, 'heads')
   expect(denied(call(DRIVE))).toBe(true)
+})
+
+describe('escalation through the hook', () => {
+  test('denied heads call opens an escalation; after approval the identical call passes once', async () => {
+    const { decideEscalation, listEscalations } = await import('../lib/escalations')
+    writeState({ [B]: req(B, HEADS, 'heads') })
+    channelPrompt(B, HEADS, 'heads')
+    const first = call(DRIVE, { query: 'q', description: 'x' })
+    expect(denied(first)).toBe(true)
+    expect(first.output!.hookSpecificOutput.permissionDecisionReason).toContain('one-time approval')
+    const esc = listEscalations(join(stateDir, 'escalations')).find(e => e.request_id === B && e.status === 'pending')!
+    expect(esc).toBeDefined()
+    // Same call again before approval: no second escalation.
+    call(DRIVE, { query: 'q' })
+    expect(listEscalations(join(stateDir, 'escalations')).filter(e => e.request_id === B && e.status === 'pending')).toHaveLength(1)
+
+    decideEscalation(join(stateDir, 'escalations'), esc.id, true, BOARD, NOW)
+    const second = call(DRIVE, { query: 'q', description: 'retry' })
+    expect(second.output).toBeNull()
+    expect(second.audit).toMatchObject({ decision: 'allow', escalation_id: esc.id })
+    // Approval is single-use.
+    expect(denied(call(DRIVE, { query: 'q' }))).toBe(true)
+    // A different input is a different call.
+    expect(denied(call(DRIVE, { query: 'other' }))).toBe(true)
+  })
+
+  test('mail for a non-owner is never escalated', () => {
+    writeState({ [B]: req(B, HEADS, 'heads') })
+    channelPrompt(B, HEADS, 'heads')
+    const r = call('mcp__claude_ai_Gmail__search_threads', { q: 'x' })
+    expect(denied(r)).toBe(true)
+    expect(r.output!.hookSpecificOutput.permissionDecisionReason).not.toContain('approval')
+  })
 })
