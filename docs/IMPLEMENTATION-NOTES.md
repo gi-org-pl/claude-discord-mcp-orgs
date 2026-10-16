@@ -57,3 +57,21 @@ Short log of how this fork was built. Newest entries at the bottom.
 - Guards for every role, board and owner included: no writes to settings,
   plugin and channel-state files; shell commands mentioning them are denied.
 - Unknown role names resolve to `none` (lowest tier).
+
+## feat/request-binding
+
+- Request id = `dr_` + 16 random hex chars. It is a lookup key, not a
+  secret the model can keep: the model sees every id in its context. Ids are
+  scrubbed from outbound `reply`/`edit_message` so Discord users never see
+  them (they cannot name someone else's request).
+- `requests.json` is written only by the server (atomic rename); the hook
+  only reads it. Records are kept `retentionDays` (30) so markers in
+  long-running sub-agents and reminders still resolve; a request counts as
+  *open* for `activeMinutes` (360) or until `end_request`.
+- Limits come from the role in the policy (`limits.maxConcurrent`,
+  `limits.dailyRequests`, UTC day). Over the limit: not delivered, one
+  notice per hour per reason, audit line.
+- Permission replies ("yes abcde") are intercepted before a request is
+  created, so they do not count against limits.
+- Policy file invalid: nothing is delivered (fail closed), error on stderr
+  and in the audit log.

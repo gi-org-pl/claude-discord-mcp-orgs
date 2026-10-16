@@ -17,3 +17,7 @@ modifications are:
 - A per-role tool policy (policy/default-policy.json, lib/policy.ts) with a
   strict shell allowlist for git, gh, package managers and read-only
   utilities (lib/shell.ts, lib/paths.ts).
+- Request binding: every delivered message gets a random request id, stored
+  with the requester and role in requests.json and shown in the channel
+  tag; per-role concurrency and daily limits; a new end_request tool;
+  request ids are scrubbed from outbound messages.
