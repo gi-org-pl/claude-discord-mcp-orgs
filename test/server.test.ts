@@ -201,3 +201,41 @@ describe('escalation', () => {
     expect(again.replies[0].content).toContain('Already decided')
   })
 })
+
+describe('permission relay only to the owner', () => {
+  const OTHER_BOARD = '100000000000000003'
+  beforeEach(() => writeAccess({
+    allowFrom: [BOARD, OTHER_BOARD],
+    members: { [BOARD]: { role: 'board' }, [OTHER_BOARD]: { role: 'board' } },
+  }))
+
+  test('a permission prompt goes to owners only, not to other board members', async () => {
+    const before = fakes.client!.userFor(BOARD).sent.length
+    await fakes.mcp!.receive('notifications/claude/channel/permission_request', {
+      request_id: 'abcde', tool_name: 'Bash', description: 'run x', input_preview: '{}',
+    })
+    await new Promise(r => setTimeout(r, 5))
+    expect(fakes.client!.userFor(BOARD).sent.length).toBe(before + 1)
+    expect(fakes.client!.userFor(OTHER_BOARD).sent).toHaveLength(0)
+  })
+
+  test('buttons from a non-owner are refused; from the owner they answer', async () => {
+    const notOwner = fakeButton('perm:allow:abcde', OTHER_BOARD)
+    await fakes.client!.emit('interactionCreate', notOwner)
+    expect(notOwner.replies[0].content).toBe('Not authorized.')
+    expect(fakes.mcp!.notifications.some(n => n.method === 'notifications/claude/channel/permission')).toBe(false)
+    const owner = fakeButton('perm:allow:abcde', BOARD)
+    await fakes.client!.emit('interactionCreate', owner)
+    expect(fakes.mcp!.notifications.find(n => n.method === 'notifications/claude/channel/permission').params).toEqual({ request_id: 'abcde', behavior: 'allow' })
+  })
+
+  test('a "yes abcde" text from a non-owner is an ordinary message, not an approval', async () => {
+    const dm = new FakeChannel('dm-o', ChannelType.DM, null, null, OTHER_BOARD)
+    await fakes.client!.emit('messageCreate', fakeMessage({ author: OTHER_BOARD, channel: dm, content: 'yes abcde' }))
+    expect(fakes.mcp!.notifications.some(n => n.method === 'notifications/claude/channel/permission')).toBe(false)
+    expect(inbound()).toHaveLength(1)
+    const dm2 = new FakeChannel('dm-b', ChannelType.DM, null, null, BOARD)
+    await fakes.client!.emit('messageCreate', fakeMessage({ author: BOARD, channel: dm2, content: 'yes abcde' }))
+    expect(fakes.mcp!.notifications.some(n => n.method === 'notifications/claude/channel/permission')).toBe(true)
+  })
+})

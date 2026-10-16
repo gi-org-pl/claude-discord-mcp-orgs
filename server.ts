@@ -503,10 +503,11 @@ const mcp = new Server(
 // Stores full permission details for "See more" expansion keyed by request_id.
 const pendingPermissions = new Map<string, { tool_name: string; description: string; input_preview: string }>()
 
-// Receive permission_request from CC → format → send to all allowlisted DMs.
-// Groups are intentionally excluded — the security thread resolution was
-// "single-user mode for official plugins." Anyone in access.allowFrom
-// already passed explicit pairing; group members haven't.
+// Receive permission_request from CC → format → send to the machine
+// owner(s) only. Approving a Claude Code permission prompt acts on the
+// owner's machine and accounts, so other people — board members included —
+// never get these, whatever their role. No owner configured = no relay
+// (the prompt waits in the terminal).
 mcp.setNotificationHandler(
   z.object({
     method: z.literal('notifications/claude/channel/permission_request'),
@@ -538,7 +539,11 @@ mcp.setNotificationHandler(
         .setEmoji('❌')
         .setStyle(ButtonStyle.Danger),
     )
-    for (const userId of access.allowFrom) {
+    appendAudit(PATHS.audit, {
+      event: 'permission_relay', tool: tool_name, decision: access.owners.length ? 'sent' : 'no_owner',
+      reason: description, recipients: access.owners.join(','),
+    })
+    for (const userId of access.owners) {
       void (async () => {
         try {
           const user = await client.users.fetch(userId)
@@ -793,7 +798,7 @@ client.on('error', err => {
 
 // Button-click handler for permission requests. customId is
 // `perm:allow:<id>`, `perm:deny:<id>`, or `perm:more:<id>`.
-// Security mirrors the text-reply path: allowFrom must contain the sender.
+// Security mirrors the text-reply path: only owners may answer.
 client.on('interactionCreate', async (interaction: Interaction) => {
   if (!interaction.isButton()) return
   const esc = /^esc:(allow|deny):(e_[0-9a-f]{10})$/.exec(interaction.customId)
@@ -801,7 +806,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
   const m = /^perm:(allow|deny|more):([a-km-z]{5})$/.exec(interaction.customId)
   if (!m) return
   const access = loadAccess()
-  if (!access.allowFrom.includes(interaction.user.id)) {
+  if (!access.owners.includes(interaction.user.id)) {
     await interaction.reply({ content: 'Not authorized.', ephemeral: true }).catch(() => {})
     return
   }
@@ -844,6 +849,10 @@ client.on('interactionCreate', async (interaction: Interaction) => {
   void mcp.notification({
     method: 'notifications/claude/channel/permission',
     params: { request_id, behavior },
+  })
+  appendAudit(PATHS.audit, {
+    event: 'permission_reply', requester_id: interaction.user.id, owner: true,
+    tool: pendingPermissions.get(request_id)?.tool_name, decision: behavior,
   })
   pendingPermissions.delete(request_id)
   const label = behavior === 'allow' ? '✅ Allowed' : '❌ Denied'
@@ -902,7 +911,9 @@ async function handleInbound(msg: Message): Promise<void> {
   // pending permission request, emit the structured event instead of
   // relaying as chat. The sender is already gate()-approved at this point
   // (non-allowlisted senders were dropped above), so we trust the reply.
-  const permMatch = PERMISSION_REPLY_RE.exec(msg.content)
+  // Only owners answer permission prompts; from anyone else the text is an
+  // ordinary message.
+  const permMatch = requester.owner ? PERMISSION_REPLY_RE.exec(msg.content) : null
   if (permMatch) {
     void mcp.notification({
       method: 'notifications/claude/channel/permission',
@@ -910,6 +921,10 @@ async function handleInbound(msg: Message): Promise<void> {
         request_id: permMatch[2]!.toLowerCase(),
         behavior: permMatch[1]!.toLowerCase().startsWith('y') ? 'allow' : 'deny',
       },
+    })
+    appendAudit(PATHS.audit, {
+      event: 'permission_reply', requester_id: requester.userId, owner: true, channel: chat_id,
+      decision: permMatch[1]!.toLowerCase().startsWith('y') ? 'allow' : 'deny',
     })
     const emoji = permMatch[1]!.toLowerCase().startsWith('y') ? '✅' : '❌'
     void msg.react(emoji).catch(() => {})

@@ -113,3 +113,11 @@ Short log of how this fork was built. Newest entries at the bottom.
 - The decision is fed back to the session as a channel notification with the
   original request id and role, so the model knows to retry or to tell the
   requester. Message text cannot fake an approval: the hook checks the file.
+
+## feat/owner-permission-relay
+
+- Upstream sent permission prompts to everyone in the DM allowlist. Now:
+  `owners` only. With no owner configured nothing is relayed and the prompt
+  waits in the terminal (safer default than "everyone").
+- A "yes abcde" text from a non-owner is not intercepted; it is delivered as
+  an ordinary message under the sender's role.

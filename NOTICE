@@ -27,3 +27,6 @@ modifications are:
 - Escalation: a denied call can be approved once by an approver via Discord
   buttons; requests, decisions and single use are recorded
   (lib/escalations.ts).
+- Claude Code permission prompts are relayed only to owners, and only owners
+  may answer them (buttons or "yes <code>" text); relays and answers are
+  audited.
