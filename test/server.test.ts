@@ -3,7 +3,7 @@
  * One import per file: server.ts is a module with side effects.
  */
 import { beforeAll, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { installFakes, fakes, fakeMessage, fakeButton, FakeChannel, ChannelType } from './fakes'
@@ -34,6 +34,14 @@ function writeAccess(extra: Record<string, unknown> = {}) {
 
 let server: any
 
+function writeSettings(installed = true) {
+  const cfg = join(dir, 'claude-config')
+  mkdirSync(cfg, { recursive: true })
+  writeFileSync(join(cfg, 'settings.json'), JSON.stringify(installed
+    ? { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'bun /opt/claude-discord-mcp-orgs/hooks/pretooluse.ts' }] }] } }
+    : { hooks: {} }))
+}
+
 function inbound() {
   return fakes.mcp!.notifications.filter(n => n.method === 'notifications/claude/channel')
 }
@@ -47,6 +55,7 @@ beforeAll(async () => {
 beforeEach(() => {
   fakes.mcp!.notifications.length = 0
   writeAccess()
+  writeSettings(true)
   for (const f of ['audit.jsonl', 'requests.json']) if (existsSync(join(dir, f))) rmSync(join(dir, f))
 })
 
@@ -237,5 +246,32 @@ describe('permission relay only to the owner', () => {
     const dm2 = new FakeChannel('dm-b', ChannelType.DM, null, null, BOARD)
     await fakes.client!.emit('messageCreate', fakeMessage({ author: BOARD, channel: dm2, content: 'yes abcde' }))
     expect(fakes.mcp!.notifications.some(n => n.method === 'notifications/claude/channel/permission')).toBe(true)
+  })
+})
+
+describe('enforcement check (fail closed without the hook)', () => {
+  test('without the hook only the owner is delivered, flagged enforcement=off', async () => {
+    writeSettings(false)
+    const ch = new FakeChannel('c-nohook', ChannelType.GuildText, GUILD)
+    const m = fakeMessage({ author: HEADS, channel: ch, mentioned: true })
+    await fakes.client!.emit('messageCreate', m)
+    expect(inbound()).toHaveLength(0)
+    expect(m.replies[0]).toContain('Access control is not active')
+    const dm = new FakeChannel('dm-1', ChannelType.DM, null, null, BOARD)
+    await fakes.client!.emit('messageCreate', fakeMessage({ author: BOARD, channel: dm }))
+    expect(inbound()).toHaveLength(1)
+    expect(inbound()[0].params.meta.enforcement).toBe('off')
+  })
+
+  test('policy can turn the check off', async () => {
+    writeSettings(false)
+    writeFileSync(join(dir, 'policy.json'), JSON.stringify({ enforcement: { requireHook: false } }))
+    try {
+      const ch = new FakeChannel('c-nohook2', ChannelType.GuildText, GUILD)
+      await fakes.client!.emit('messageCreate', fakeMessage({ author: HEADS, channel: ch, mentioned: true }))
+      expect(inbound()).toHaveLength(1)
+    } finally {
+      rmSync(join(dir, 'policy.json'))
+    }
   })
 })

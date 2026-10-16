@@ -101,5 +101,6 @@
     "pattern": "(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|CREDENTIAL|_PAT$)",
     "allow": []
   },
-  "requests": { "activeMinutes": 360, "retentionDays": 30 }
+  "requests": { "activeMinutes": 360, "retentionDays": 30 },
+  "enforcement": { "requireHook": true }
 }

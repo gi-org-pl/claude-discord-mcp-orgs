@@ -121,3 +121,13 @@ Short log of how this fork was built. Newest entries at the bottom.
   waits in the terminal (safer default than "everyone").
 - A "yes abcde" text from a non-owner is not intercepted; it is delivered as
   an ordinary message under the sender's role.
+
+## feat/enforcement-check
+
+- Answers the "hook switched off by mistake" case of the test plan: the
+  plugin cannot verify the hook runs, but it can see whether user (and, if
+  known, project) settings register it. Missing = owners only, with
+  `enforcement="off"` in the tag so the session knows.
+- If the plugin is off, nothing arrives from Discord at all. If the upstream
+  plugin runs instead of the fork, channel tags carry no `request_id` and
+  the hook treats the session as lowest tier.
