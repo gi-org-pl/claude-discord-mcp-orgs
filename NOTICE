@@ -30,3 +30,5 @@ modifications are:
 - Claude Code permission prompts are relayed only to owners, and only owners
   may answer them (buttons or "yes <code>" text); relays and answers are
   audited.
+- Enforcement check: while no PreToolUse hook is found in the settings, only
+  owners are delivered (lib/enforcement.ts).

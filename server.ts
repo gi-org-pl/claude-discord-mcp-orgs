@@ -44,6 +44,7 @@ import {
 import { appendAudit } from './lib/audit.ts'
 import { statePaths } from './lib/state.ts'
 import { type Policy, loadPolicy, NONE_ROLE } from './lib/policy.ts'
+import { hookInstalled } from './lib/enforcement.ts'
 import { decideEscalation, markNotified, readEscalation, unnotified } from './lib/escalations.ts'
 import {
   checkLimits,
@@ -945,6 +946,21 @@ async function handleInbound(msg: Message): Promise<void> {
   const roleDefn = policy.roles[requester.role]
   if (!roleDefn || requester.role === NONE_ROLE) return dropNoRole(result.access, `unknown role "${requester.role}"`, requester.role)
 
+  // Fail closed when the PreToolUse hook is not installed: roles would be
+  // labels only. Owners still get through (with enforcement="off" in the
+  // tag), so the operator can fix it; everyone else is refused.
+  const enforcementOff = policy.enforcement?.requireHook !== false && !hookInstalled()
+  if (enforcementOff && !requester.owner) {
+    appendAudit(PATHS.audit, {
+      event: 'inbound', requester_id: requester.userId, role: requester.role, channel: chat_id,
+      decision: 'drop', reason: 'enforcement hook not installed',
+    })
+    if (shouldNotify(`nohook:${requester.userId}`, Date.now(), 60 * 60 * 1000)) {
+      void msg.reply('Access control is not active on this machine right now, so only the owner can use the assistant. Ask the owner.').catch(() => {})
+    }
+    return
+  }
+
   const now = Date.now()
   const reqState = loadRequests(PATHS.requests)
   prune(reqState, now, policy.requests.retentionDays)
@@ -1016,6 +1032,7 @@ async function handleInbound(msg: Message): Promise<void> {
         role: requester.role,
         request_id,
         ...(requester.owner ? { owner: 'true' } : {}),
+        ...(enforcementOff ? { enforcement: 'off' } : {}),
         ...(atts.length > 0 ? { attachment_count: String(atts.length), attachments: atts.join('; ') } : {}),
       },
     },

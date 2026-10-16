@@ -248,3 +248,15 @@ input; `description`/`timeout` ignored) passes once within one hour. Owner-only
 denials, protected files, Discord channel restrictions and calls from the
 main thread with several open requests are not escalated. At most five
 approval requests wait per request.
+
+## Enforcement check
+
+Without the hook, roles are only labels. On every inbound message the server
+looks for a PreToolUse hook (matcher `*` or empty) whose command contains
+`pretooluse.ts` in `CLAUDE_CONFIG_DIR` (or `~/.claude`) `settings.json` /
+`settings.local.json`, and in the project settings when `CLAUDE_PROJECT_DIR`
+is set; `disableAllHooks: true` counts as missing. When it is missing, only
+owners are delivered (their tag carries `enforcement="off"`) and everyone
+else gets a short note. If you install the hook somewhere the server cannot
+see (managed settings, `--settings`), set `"enforcement": { "requireHook":
+false }` in `policy.json`.

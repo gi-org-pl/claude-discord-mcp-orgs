@@ -54,6 +54,8 @@ export type Policy = {
   protectedShellWords: string[]
   secretEnv: { pattern: string; allow: string[] }
   requests: { activeMinutes: number; retentionDays: number }
+  /** requireHook (default true): refuse non-owners while the hook is not installed. */
+  enforcement?: { requireHook?: boolean }
 }
 
 export const NONE_ROLE = 'none'
