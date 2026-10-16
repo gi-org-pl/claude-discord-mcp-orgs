@@ -15,6 +15,8 @@ All state lives in `~/.claude/channels/discord/access.json`. The `/discord:acces
 | Default policy | `pairing` |
 | Sender ID | User snowflake (numeric, e.g. `184695080709324800`) |
 | Group key | Channel snowflake — not guild ID |
+| Guild rule key | Guild snowflake + user snowflake |
+| Default for senders without a role | Not delivered (default deny) |
 | Config file | `~/.claude/channels/discord/access.json` |
 
 ## DM policies
@@ -57,6 +59,61 @@ With the default `requireMention: true`, the bot responds only when @mentioned o
 /discord:access group add 846209781206941736 --allow 184695080709324800,221773638772129792
 /discord:access group rm 846209781206941736
 ```
+
+## Roles, owners and default deny
+
+This fork adds roles. A sender who passes the gates above (DM allowlist,
+channel entry or guild rule) is delivered to the session **only if they hold a
+role**. Otherwise the message is dropped, logged in `audit.jsonl`, and the
+sender gets one short "no permissions" reply per 24 hours (`noRoleNotice:
+false` turns the reply off). The message is not delivered with a note,
+because a delivered message already puts the stranger's text in the session's
+context, where it can carry instructions.
+
+Roles are explicit lists of user ids kept in `access.json`. Discord server
+roles are not consulted: anyone with "Manage Roles" on the server could
+otherwise grant themselves access to the operator's machine.
+
+```
+/discord:access role set 184695080709324800 board
+/discord:access role set 221773638772129792 heads
+/discord:access role rm 221773638772129792
+```
+
+The **owner** is a separate flag, not a role. It marks the machine owner: only
+owners get Claude Code permission prompts relayed to them and only owners may
+trigger owner-only connectors (by default: mail). An owner also needs a role.
+
+```
+/discord:access owner add 184695080709324800
+```
+
+What each role may do is defined in the policy (`policy.json`, see the
+README). The built-in policy has `board`, `heads` and `volunteer`.
+
+Each delivered message carries the requester's role in its `<channel>` tag
+(`role="heads"`, plus `owner="true"` for owners).
+
+## Guild-level grants
+
+Per-channel entries need a new command for every new channel. A guild rule
+grants one user access in every channel of a guild, including channels
+created later; threads inherit.
+
+```
+/discord:access guild grant 846209781206941000 184695080709324800 --role heads
+/discord:access guild grant 846209781206941000 221773638772129792 --no-mention
+/discord:access guild revoke 846209781206941000 221773638772129792
+/discord:access guild list
+```
+
+- `--role` sets the user's role inside that guild. Without it the global role
+  from `role set` applies.
+- `--no-mention` lets the user trigger the bot without an @mention.
+- A per-channel entry (`group add`) overrides the guild rule for that channel:
+  if the channel has an entry, only that entry decides who may write there.
+- Role resolution, most specific first: channel `roles` override, guild
+  grant role, global role, none.
 
 ## Mention detection
 
@@ -101,7 +158,12 @@ Configure outbound behavior with `/discord:access set <key> <value>`.
 | `/discord:access policy allowlist` | Set `dmPolicy`. Values: `pairing`, `allowlist`, `disabled`. |
 | `/discord:access group add 846209781206941736` | Enable a guild channel. Flags: `--no-mention`, `--allow id1,id2`. |
 | `/discord:access group rm 846209781206941736` | Disable a guild channel. |
-| `/discord:access set ackReaction 🔨` | Set a config key: `ackReaction`, `replyToMode`, `textChunkLimit`, `chunkMode`, `mentionPatterns`. |
+| `/discord:access role set 184695080709324800 heads` | Give a user a global role. `role rm <id>` removes it. |
+| `/discord:access owner add 184695080709324800` | Mark a machine owner. `owner rm <id>` removes the flag. |
+| `/discord:access guild grant <guildId> <userId>` | Guild-level rule for one user. Flags: `--role board|heads|volunteer`, `--no-mention`. |
+| `/discord:access guild revoke <guildId> <userId>` | Remove a guild-level rule. |
+| `/discord:access guild list` | Print guild rules with effective roles. |
+| `/discord:access set ackReaction 🔨` | Set a config key: `ackReaction`, `replyToMode`, `textChunkLimit`, `chunkMode`, `mentionPatterns`, `noRoleNotice`. |
 
 ## Config file
 
@@ -122,6 +184,21 @@ Configure outbound behavior with `/discord:access set <key> <value>`.
       "requireMention": true,
       // Restrict triggers to these senders. Empty = any member (subject to requireMention).
       "allowFrom": []
+    }
+  },
+
+  // Global roles. A sender without a role is not delivered.
+  "members": { "184695080709324800": { "role": "board" } },
+
+  // Machine owner(s): permission prompts and owner-only connectors.
+  "owners": ["184695080709324800"],
+
+  // Guild-level grants: every channel of the guild, also future ones.
+  "guilds": {
+    "846209781206941000": {
+      "members": {
+        "221773638772129792": { "role": "heads", "requireMention": true }
+      }
     }
   },
 
