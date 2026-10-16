@@ -14,3 +14,6 @@ modifications are:
 - Roles, an owner flag and guild-level grants in access.json; senders
   without a role are not delivered (default deny); the inbound gate moved
   to lib/access.ts. New access commands: role, owner, guild grant/revoke/list.
+- A per-role tool policy (policy/default-policy.json, lib/policy.ts) with a
+  strict shell allowlist for git, gh, package managers and read-only
+  utilities (lib/shell.ts, lib/paths.ts).

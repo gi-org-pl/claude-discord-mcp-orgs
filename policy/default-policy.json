@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "roles": {
+    "board": {
+      "rank": 30,
+      "description": "Full access. Owner-only connectors (mail) still require the owner flag.",
+      "categories": { "mail": "owner", "*": "allow" },
+      "limits": {},
+      "approvesEscalations": true
+    },
+    "heads": {
+      "rank": 20,
+      "description": "git/gh and local repo setup, installs and tests only in an isolated worktree, figma-bridge without deletion. No Drive, mail or Framer.",
+      "categories": {
+        "session": "allow",
+        "agent": "allow",
+        "discord": "allow",
+        "file-read": "allow",
+        "file-write": "worktree",
+        "shell": "allowlist",
+        "worktree": "allow",
+        "web": "allow",
+        "figma-bridge-destructive": "deny",
+        "figma-bridge": "allow",
+        "*": "deny"
+      },
+      "shell": { "git": "write", "gh": "write", "packageManagers": "worktree", "utilities": "read" },
+      "limits": { "maxConcurrent": 2, "dailyRequests": 40 },
+      "escalate": true,
+      "ownChannelOnly": true,
+      "protectSecrets": true
+    },
+    "volunteer": {
+      "rank": 10,
+      "description": "Pull request review only: read repositories and PRs, comment. No running code, no push.",
+      "categories": {
+        "session": "allow",
+        "agent": "allow",
+        "discord": "allow",
+        "file-read": "allow",
+        "shell": "allowlist",
+        "*": "deny"
+      },
+      "shell": { "git": "read", "gh": "review", "utilities": "read" },
+      "limits": { "maxConcurrent": 1, "dailyRequests": 15 },
+      "escalate": true,
+      "ownChannelOnly": true,
+      "protectSecrets": true
+    },
+    "none": {
+      "rank": 0,
+      "description": "Lowest tier: used when the requester cannot be determined.",
+      "categories": { "session": "allow", "discord": "allow", "*": "deny" },
+      "ownChannelOnly": true,
+      "protectSecrets": true
+    }
+  },
+  "categories": {
+    "session": {
+      "tools": [
+        "TodoWrite", "ToolSearch", "Skill", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet",
+        "TaskOutput", "TaskStop", "SendMessage", "EnterPlanMode", "ExitPlanMode", "AskUserQuestion",
+        "SubagentHandback"
+      ]
+    },
+    "agent": { "tools": ["Agent", "Task"] },
+    "discord": { "tools": ["mcp__plugin_discord*_discord__*"] },
+    "mail": { "tools": ["mcp__*gmail*", "mcp__*outlook*", "mcp__*mail*"], "escalate": false },
+    "google-workspace": {
+      "tools": ["mcp__*google_drive*", "mcp__*google_docs*", "mcp__*google_sheets*", "mcp__*google_slides*", "mcp__*google_calendar*", "mcp__*gdrive*"]
+    },
+    "figma-bridge-destructive": { "tools": ["mcp__figma-bridge__delete_nodes"] },
+    "figma-bridge": { "tools": ["mcp__figma-bridge__*"] },
+    "figma": { "tools": ["mcp__*figma*"] },
+    "framer": { "tools": ["mcp__*framer*"] },
+    "file-read": { "tools": ["Read", "Glob", "Grep", "NotebookRead", "LS"] },
+    "file-write": { "tools": ["Write", "Edit", "MultiEdit", "NotebookEdit"] },
+    "shell": { "tools": ["Bash", "Monitor"] },
+    "powershell": { "tools": ["PowerShell"] },
+    "worktree": { "tools": ["EnterWorktree", "ExitWorktree"] },
+    "web": { "tools": ["WebFetch", "WebSearch"] },
+    "scheduling": { "tools": ["CronCreate", "CronDelete", "CronList", "ScheduleWakeup", "RemoteTrigger"] }
+  },
+  "sharedBranches": ["main", "master", "develop", "dev", "release/*", "production", "staging"],
+  "worktreeRoots": ["**/.claude/worktrees/*", "**/.worktrees/*"],
+  "secretPaths": [
+    "**/.env", "**/.env.*", "**/.ssh", "**/.aws", "**/.gnupg", "**/.npmrc", "**/.netrc",
+    "**/.git-credentials", "**/.config/gh", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*",
+    "**/credentials*.json", "~/.claude", "~/.claude.json"
+  ],
+  "secretPathExceptions": ["**/.env.example", "**/.env.sample", "**/.env.template"],
+  "protectedPaths": [
+    "~/.claude/settings.json", "~/.claude/settings.local.json", "**/.claude/settings.json",
+    "**/.claude/settings.local.json", "~/.claude/channels", "~/.claude/plugins", "**/managed-settings.json"
+  ],
+  "protectedShellWords": [
+    "settings.json", "settings.local.json", "channels/discord", "channels\\discord", "access.json",
+    "policy.json", "requests.json", "pretooluse"
+  ],
+  "secretEnv": {
+    "pattern": "(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|CREDENTIAL|_PAT$)",
+    "allow": []
+  },
+  "requests": { "activeMinutes": 360, "retentionDays": 30 }
+}
