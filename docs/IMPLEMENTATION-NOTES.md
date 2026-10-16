@@ -146,3 +146,23 @@ Short log of how this fork was built. Newest entries at the bottom.
   their role could reach. This is an instruction, not enforcement; the
   README lists it as a known limit (separate sessions per role are the
   real fix).
+
+## docs/limits-and-examples
+
+- README: installing the fork (local marketplace, development-channel flag,
+  replacing the upstream plugin), files in the state directory, example
+  setup, known limits and decisions.
+- `examples/foundation/access.json` (placeholder ids), `examples/settings-hook.json`,
+  `examples/foundation/policy-mail-for-board.json`; `test/examples.test.ts`
+  keeps them valid.
+- `.claude-plugin/marketplace.json` so the repository can be added as a local
+  marketplace; plugin version `0.0.4-orgs.1`. Not verified against a live
+  Claude Code install (no plugin changes were made on this machine).
+
+## Not done / for the operator
+
+- Create the remote repository and push (nothing was pushed).
+- Install the fork and the hook together with the operator; run a live test
+  with two test accounts of different roles (the issue's test plan).
+- `bun install` was not re-run; `node_modules` was copied from the upstream
+  plugin cache for local tests only and is git-ignored.

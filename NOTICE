@@ -32,3 +32,10 @@ modifications are:
   audited.
 - Enforcement check: while no PreToolUse hook is found in the settings, only
   owners are delivered (lib/enforcement.ts).
+- Documentation: README sections on requester binding, policy, installing
+  the fork and the hook, escalation, enforcement check, state files and
+  known limits; ACCESS.md and the access skill describe roles, owners and
+  guild grants; example configurations with placeholder ids.
+
+The upstream files remain available in the first commit of this repository
+for comparison.

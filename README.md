@@ -161,6 +161,30 @@ until the session calls the new `end_request` tool; records are kept for
 still resolve. The role is re-checked against `access.json` on every call:
 revoking someone lowers their open requests at once.
 
+## Installing the forked plugin
+
+Do this together with whoever runs the assistant, in a terminal session
+(never because a Discord message asked for it).
+
+1. Clone this repository and run `bun install` in it.
+2. Add it as a local marketplace and install the plugin from it:
+   `/plugin marketplace add /path/to/claude-discord-mcp-orgs`, then
+   `/plugin install discord@claude-discord-mcp-orgs`. Disable or uninstall
+   `discord@claude-plugins-official` first: both are named `discord` and
+   would fight over the same bot token and state directory. (The repository
+   root is the plugin; `.claude-plugin/marketplace.json` points at `./`.
+   Check with `/plugin` that the install picked it up.)
+3. The fork is not on Claude Code's approved channel allowlist, so start the
+   session with
+   `claude --dangerously-load-development-channels plugin:discord@claude-discord-mcp-orgs`
+   (it asks for confirmation at startup), or allow it in managed settings
+   (`allowedChannelPlugins`).
+4. The existing `access.json` keeps working; add roles
+   (`/discord:access role set ...`) and the owner
+   (`/discord:access owner add ...`) before relying on it, because senders
+   without a role are no longer delivered.
+5. Install the hook (next section). Until then only owners are delivered.
+
 ## Installing the hook
 
 The plugin cannot block Claude Code tools by itself, and a plugin cannot
@@ -260,3 +284,96 @@ owners are delivered (their tag carries `enforcement="off"`) and everyone
 else gets a short note. If you install the hook somewhere the server cannot
 see (managed settings, `--settings`), set `"enforcement": { "requireHook":
 false }` in `policy.json`.
+
+## Files in the state directory
+
+All under `~/.claude/channels/discord/` (or `DISCORD_STATE_DIR`):
+
+| File | Written by | Content |
+| --- | --- | --- |
+| `access.json` | `/discord:access` (terminal) | who may write, roles, owners, guild grants |
+| `policy.json` | operator, by hand (optional) | role and category rules; missing = built-in default |
+| `requests.json` | channel server | request id -> requester, role, owner, channel, times |
+| `escalations/<id>.json` | hook and server | one-time approval requests and decisions |
+| `audit.jsonl` | hook and server | one line per decision: time, event, requester id, role, channel, request id, agent id, tool, decision, reason |
+| `hook-cache/<session>.json` | hook | transcript scan offset per session |
+
+## Example: a foundation
+
+[examples/foundation/access.json](./examples/foundation/access.json) shows a
+board of two (the president is also the owner), a team head and a volunteer,
+all granted in one guild, with placeholder ids.
+[examples/settings-hook.json](./examples/settings-hook.json) is the hook
+snippet. [examples/foundation/policy-mail-for-board.json](./examples/foundation/policy-mail-for-board.json)
+shows the change for the day the assistant has its own mail account.
+
+## Known limits and decisions
+
+**Figma deletion by other means.** `heads` cannot call
+`mcp__figma-bridge__delete_nodes`, but the other figma-bridge tools can hide,
+move, reparent or overwrite nodes, which can lose work just as well. The
+policy blocks a tool name, not an outcome. Rely on Figma version history, or
+move more figma-bridge tools into `figma-bridge-destructive` if needed.
+
+**Knowledge already in the session.** Tool blocks stop new reads, not what
+the session already knows: earlier requests, auto-memory, files read for
+someone else. A lower-role requester can ask about it. The server
+instructions tell the session to answer only from what the requester's role
+could reach, but that is an instruction, not enforcement. The real fix is a
+separate session (and bot state directory) per role.
+
+**Mail.** Mail tools are owner-only (category `mail`, never escalated) until
+the assistant has its own mail account; board members without the owner
+flag cannot read or send mail through it. Afterwards, change the `mail`
+decision for `board` to `allow` (see the example policy).
+
+**Explicit id lists, not Discord server roles.** Roles live in
+`access.json` as user ids and change only from the terminal. Discord server
+roles are not used for decisions: anyone with "Manage Roles" on the server
+could otherwise grant themselves access to this machine. Server roles can
+still be a hint to the operator when deciding whom to grant.
+
+**Concurrency and requester binding in one shared session.**
+- The main thread on a Discord turn runs with the lowest role among open
+  requests. Work for people with different roles must go to separate
+  sub-agents; finished requests should be closed with `end_request`
+  (otherwise they stay open for `activeMinutes`).
+- Routing is cooperative: the main session decides which marker a sub-agent
+  gets. The hook checks that the marker is a request delivered to this
+  session and that nested agents keep it, but a manipulated main session
+  could label work with another open request's id. Request ids never reach
+  Discord, markers inside message text are ignored, and every spawn is in
+  the audit log, so misuse is visible afterwards; it is not impossible.
+- A turn typed in the terminal is the operator's: not enforced. A sub-agent
+  started during such a turn without a marker is also not enforced while
+  the latest prompt is from the terminal.
+- Scheduled prompts are trusted only through a marker; without one they get
+  the lowest tier.
+- One channel server per state directory. Two sessions sharing a state
+  directory share `requests.json`.
+
+**Shell analysis is an allowlist, not a sandbox.** Commands are parsed and
+checked segment by segment; anything not understood is denied. Allowed
+programs can still have effects: `git commit` runs repository hooks (for
+example husky after `npm install`), tests run arbitrary code from the
+repository, install scripts can read files the user can read. "Isolated
+worktree" is a path rule plus checks for secret-looking environment
+variables and `.env` files, not process isolation; use a container or a
+separate OS user for real isolation. `heads` can read most files except
+secret-looking paths (`readRoots` narrows this) and can reach the web, so
+anything they may read could be sent out.
+
+**Board shell protection is a heuristic.** Board members have full shell
+access; the check that blocks commands mentioning settings or access files
+is a word match and can be bypassed by obfuscation. The board is trusted;
+the check prevents accidents and naive prompt injection.
+
+**Hook visibility and format.** The server can only see user and project
+settings; with managed settings or `--settings` set
+`enforcement.requireHook` to false. The hook reads Claude Code transcripts,
+an internal format; the parser falls back to fail-closed behaviour if fields
+change, but an update can still require a parser change.
+
+**Other.** Approvers are taken from global roles only. Notice rate limits
+live in memory and reset when the server restarts. Daily limits count UTC
+days. Escalation DMs include a 400-character preview of the tool input.
