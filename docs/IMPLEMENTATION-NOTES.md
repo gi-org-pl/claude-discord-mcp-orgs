@@ -16,3 +16,20 @@ Short log of how this fork was built. Newest entries at the bottom.
 - `lib/audit.ts`: JSONL audit log. Writes never throw; fields are clipped to
   500 characters so a long command cannot bloat the log.
 - `package.json` renamed to `claude-discord-mcp-orgs`, `bun test` script.
+
+## feat/roles-and-guild-rules
+
+- Gate logic moved out of `server.ts` into `lib/access.ts` (`evaluateGate`)
+  so it can be tested without discord.js. Behaviour for DMs, pairing and
+  per-channel entries is unchanged except for the role check at the end.
+- New keys: `members` (global roles), `owners` (flag), `guilds` (per-user
+  guild grants). Role resolution: channel `roles` override > guild grant >
+  global role > none.
+- Default deny decision: a sender without a role is **dropped**, not
+  delivered with a note. Reason: delivery already places their text in the
+  session context. They get one short reply per 24 h (in-memory rate limit,
+  resets on restart) unless `noRoleNotice` is false.
+- Outbound tools may target any channel of a guild that has a guild rule,
+  mirroring the inbound side.
+- `test/fakes.ts` mocks discord.js and the MCP SDK with `mock.module`, so
+  `server.ts` is imported for real in `test/server.test.ts`.

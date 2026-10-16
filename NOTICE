@@ -11,3 +11,6 @@ modifications are:
 
 - Shared state helpers and an append-only JSONL audit log (lib/state.ts,
   lib/audit.ts).
+- Roles, an owner flag and guild-level grants in access.json; senders
+  without a role are not delivered (default deny); the inbound gate moved
+  to lib/access.ts. New access commands: role, owner, guild grant/revoke/list.

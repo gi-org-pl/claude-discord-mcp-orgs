@@ -33,11 +33,22 @@ import { randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
 import { homedir } from 'os'
 import { join, sep } from 'path'
+import {
+  type Access,
+  type GateResult,
+  defaultAccess,
+  normalizeAccess,
+  evaluateGate,
+  guildChannelAllowed,
+} from './lib/access.ts'
+import { appendAudit } from './lib/audit.ts'
+import { statePaths } from './lib/state.ts'
 
 const STATE_DIR = process.env.DISCORD_STATE_DIR ?? join(homedir(), '.claude', 'channels', 'discord')
 const ACCESS_FILE = join(STATE_DIR, 'access.json')
 const APPROVED_DIR = join(STATE_DIR, 'approved')
 const ENV_FILE = join(STATE_DIR, '.env')
+const PATHS = statePaths(STATE_DIR)
 
 // Load ~/.claude/channels/discord/.env into process.env. Real env wins.
 // Plugin-spawned servers don't get an env block — this is where the token lives.
@@ -89,46 +100,6 @@ const client = new Client({
   partials: [Partials.Channel],
 })
 
-type PendingEntry = {
-  senderId: string
-  chatId: string // DM channel ID — where to send the approval confirm
-  createdAt: number
-  expiresAt: number
-  replies: number
-}
-
-type GroupPolicy = {
-  requireMention: boolean
-  allowFrom: string[]
-}
-
-type Access = {
-  dmPolicy: 'pairing' | 'allowlist' | 'disabled'
-  allowFrom: string[]
-  /** Keyed on channel ID (snowflake), not guild ID. One entry per guild channel. */
-  groups: Record<string, GroupPolicy>
-  pending: Record<string, PendingEntry>
-  mentionPatterns?: string[]
-  // delivery/UX config — optional, defaults live in the reply handler
-  /** Emoji to react with on receipt. Empty string disables. Unicode char or custom emoji ID. */
-  ackReaction?: string
-  /** Which chunks get Discord's reply reference when reply_to is passed. Default: 'first'. 'off' = never thread. */
-  replyToMode?: 'off' | 'first' | 'all'
-  /** Max chars per outbound message before splitting. Default: 2000 (Discord's hard cap). */
-  textChunkLimit?: number
-  /** Split on paragraph boundaries instead of hard char count. */
-  chunkMode?: 'length' | 'newline'
-}
-
-function defaultAccess(): Access {
-  return {
-    dmPolicy: 'pairing',
-    allowFrom: [],
-    groups: {},
-    pending: {},
-  }
-}
-
 const MAX_CHUNK_LIMIT = 2000
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
@@ -151,18 +122,7 @@ function assertSendable(f: string): void {
 function readAccessFile(): Access {
   try {
     const raw = readFileSync(ACCESS_FILE, 'utf8')
-    const parsed = JSON.parse(raw) as Partial<Access>
-    return {
-      dmPolicy: parsed.dmPolicy ?? 'pairing',
-      allowFrom: parsed.allowFrom ?? [],
-      groups: parsed.groups ?? {},
-      pending: parsed.pending ?? {},
-      mentionPatterns: parsed.mentionPatterns,
-      ackReaction: parsed.ackReaction,
-      replyToMode: parsed.replyToMode,
-      textChunkLimit: parsed.textChunkLimit,
-      chunkMode: parsed.chunkMode,
-    }
+    return normalizeAccess(JSON.parse(raw) as Partial<Access>)
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return defaultAccess()
     try { renameSync(ACCESS_FILE, `${ACCESS_FILE}.corrupt-${Date.now()}`) } catch {}
@@ -200,26 +160,20 @@ function saveAccess(a: Access): void {
   renameSync(tmp, ACCESS_FILE)
 }
 
-function pruneExpired(a: Access): boolean {
-  const now = Date.now()
-  let changed = false
-  for (const [code, p] of Object.entries(a.pending)) {
-    if (p.expiresAt < now) {
-      delete a.pending[code]
-      changed = true
-    }
-  }
-  return changed
-}
-
-type GateResult =
-  | { action: 'deliver'; access: Access }
-  | { action: 'drop' }
-  | { action: 'pair'; code: string; isResend: boolean }
-
 // Track message IDs we recently sent, so reply-to-bot in guild channels
 // counts as a mention without needing fetchReference().
 const recentSentIds = new Set<string>()
+
+// Rate limit for short notices sent to people (no role, limits, ...): at most
+// one per key per window, so a notice can never become a spam amplifier.
+const NOTICE_WINDOW_MS = 24 * 60 * 60 * 1000
+const lastNotice = new Map<string, number>()
+function shouldNotify(key: string, now: number = Date.now()): boolean {
+  const last = lastNotice.get(key)
+  if (last !== undefined && now - last < NOTICE_WINDOW_MS) return false
+  lastNotice.set(key, now)
+  return true
+}
 const RECENT_SENT_CAP = 200
 
 const dmChannelUsers = new Map<string, string>()
@@ -234,63 +188,18 @@ function noteSent(id: string): void {
 }
 
 async function gate(msg: Message): Promise<GateResult> {
-  const access = loadAccess()
-  const pruned = pruneExpired(access)
-  if (pruned) saveAccess(access)
-
-  if (access.dmPolicy === 'disabled') return { action: 'drop' }
-
-  const senderId = msg.author.id
   const isDM = msg.channel.type === ChannelType.DM
-
-  if (isDM) {
-    if (access.allowFrom.includes(senderId)) return { action: 'deliver', access }
-    if (access.dmPolicy === 'allowlist') return { action: 'drop' }
-
-    // pairing mode — check for existing non-expired code for this sender
-    for (const [code, p] of Object.entries(access.pending)) {
-      if (p.senderId === senderId) {
-        // Reply twice max (initial + one reminder), then go silent.
-        if ((p.replies ?? 1) >= 2) return { action: 'drop' }
-        p.replies = (p.replies ?? 1) + 1
-        saveAccess(access)
-        return { action: 'pair', code, isResend: true }
-      }
-    }
-    // Cap pending at 3. Extra attempts are silently dropped.
-    if (Object.keys(access.pending).length >= 3) return { action: 'drop' }
-
-    const code = randomBytes(3).toString('hex') // 6 hex chars
-    const now = Date.now()
-    access.pending[code] = {
-      senderId,
-      chatId: msg.channelId, // DM channel ID — used later to confirm approval
-      createdAt: now,
-      expiresAt: now + 60 * 60 * 1000, // 1h
-      replies: 1,
-    }
-    saveAccess(access)
-    return { action: 'pair', code, isResend: false }
-  }
-
-  // We key on channel ID (not guild ID) — simpler, and lets the user
-  // opt in per-channel rather than per-server. Threads inherit their
-  // parent channel's opt-in; the reply still goes to msg.channelId
-  // (the thread), this is only the gate lookup.
-  const channelId = msg.channel.isThread()
-    ? msg.channel.parentId ?? msg.channelId
-    : msg.channelId
-  const policy = access.groups[channelId]
-  if (!policy) return { action: 'drop' }
-  const groupAllowFrom = policy.allowFrom ?? []
-  const requireMention = policy.requireMention ?? true
-  if (groupAllowFrom.length > 0 && !groupAllowFrom.includes(senderId)) {
-    return { action: 'drop' }
-  }
-  if (requireMention && !(await isMentioned(msg, access.mentionPatterns))) {
-    return { action: 'drop' }
-  }
-  return { action: 'deliver', access }
+  const isThread = !isDM && msg.channel.isThread()
+  return evaluateGate(loadAccess(), {
+    senderId: msg.author.id,
+    isDM,
+    channelId: msg.channelId,
+    parentId: isThread ? (msg.channel as { parentId?: string | null }).parentId ?? null : null,
+    guildId: msg.guildId ?? null,
+  }, {
+    isMentioned: () => isMentioned(msg, loadAccess().mentionPatterns),
+    save: saveAccess,
+  })
 }
 
 async function isMentioned(msg: Message, extraPatterns?: string[]): Promise<boolean> {
@@ -410,7 +319,8 @@ async function fetchAllowedChannel(id: string) {
     if (userId && access.allowFrom.includes(userId)) return ch
   } else {
     const key = ch.isThread() ? ch.parentId ?? ch.id : ch.id
-    if (key in access.groups) return ch
+    const guildId = 'guildId' in ch ? (ch.guildId as string | null) : null
+    if (guildChannelAllowed(access, key, guildId)) return ch
   }
   throw new Error(`channel ${id} is not allowlisted — add via /discord:access`)
 }
@@ -826,6 +736,26 @@ async function handleInbound(msg: Message): Promise<void> {
 
   const chat_id = msg.channelId
 
+  if (result.action === 'no_role') {
+    // Default deny: the sender passed the channel gate but holds no role.
+    // The message is NOT delivered to the session (no prompt injection, no
+    // context from people without permissions); they get one short note.
+    appendAudit(PATHS.audit, {
+      event: 'inbound', requester_id: msg.author.id, channel: chat_id,
+      decision: 'drop', reason: 'no role',
+    })
+    if (result.access.noRoleNotice !== false && shouldNotify(`norole:${msg.author.id}`)) {
+      void msg.reply('You have no permissions for this assistant yet. Ask the owner to grant you a role.').catch(() => {})
+    }
+    return
+  }
+
+  const requester = result.requester
+  appendAudit(PATHS.audit, {
+    event: 'inbound', requester_id: requester.userId, role: requester.role,
+    owner: requester.owner, channel: chat_id, decision: 'deliver',
+  })
+
   if (msg.channel.type === ChannelType.DM) {
     dmChannelUsers.set(chat_id, msg.author.id)
   }
@@ -882,6 +812,10 @@ async function handleInbound(msg: Message): Promise<void> {
         user: msg.author.username,
         user_id: msg.author.id,
         ts: msg.createdAt.toISOString(),
+        // Role of the requester, decided by access.json at delivery time.
+        // Meta attributes are set by this server, never by message content.
+        role: requester.role,
+        ...(requester.owner ? { owner: 'true' } : {}),
         ...(atts.length > 0 ? { attachment_count: String(atts.length), attachments: atts.join('; ') } : {}),
       },
     },
