@@ -1,0 +1,11 @@
+{
+  "name": "claude-discord-mcp-orgs",
+  "owner": { "name": "claude-discord-mcp-orgs contributors" },
+  "plugins": [
+    {
+      "name": "discord",
+      "source": "./",
+      "description": "Discord channel for organisations: roles, request binding, audit log, escalation."
+    }
+  ]
+}

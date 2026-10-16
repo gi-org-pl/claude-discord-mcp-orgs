@@ -1,11 +1,13 @@
 {
   "name": "discord",
-  "description": "Discord channel for Claude Code \u2014 messaging bridge with built-in access control. Manage pairing, allowlists, and policy via /discord:access.",
-  "version": "0.0.4",
+  "description": "Discord channel for Claude Code for organisations: per-sender roles, guild grants, request binding with a PreToolUse hook, audit log and one-time escalation. Fork of the official discord plugin 0.0.4.",
+  "version": "0.0.4-orgs.1",
   "keywords": [
     "discord",
     "messaging",
     "channel",
-    "mcp"
+    "mcp",
+    "roles",
+    "audit"
   ]
 }

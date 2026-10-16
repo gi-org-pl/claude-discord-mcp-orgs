@@ -1,0 +1,34 @@
+{
+  "_comment": "Not active. Shows the one change needed once the assistant has its own mail account: board members may use mail, not only the owner. Top-level keys replace the defaults as a whole, so this file repeats every role.",
+  "roles": {
+    "board": {
+      "rank": 30,
+      "categories": { "*": "allow" },
+      "limits": {},
+      "approvesEscalations": true
+    },
+    "heads": {
+      "rank": 20,
+      "categories": {
+        "session": "allow", "agent": "allow", "discord": "allow", "file-read": "allow",
+        "file-write": "worktree", "shell": "allowlist", "worktree": "allow", "web": "allow",
+        "figma-bridge-destructive": "deny", "figma-bridge": "allow", "*": "deny"
+      },
+      "shell": { "git": "write", "gh": "write", "packageManagers": "worktree", "utilities": "read" },
+      "limits": { "maxConcurrent": 2, "dailyRequests": 40 },
+      "escalate": true, "ownChannelOnly": true, "protectSecrets": true
+    },
+    "volunteer": {
+      "rank": 10,
+      "categories": { "session": "allow", "agent": "allow", "discord": "allow", "file-read": "allow", "shell": "allowlist", "*": "deny" },
+      "shell": { "git": "read", "gh": "review", "utilities": "read" },
+      "limits": { "maxConcurrent": 1, "dailyRequests": 15 },
+      "escalate": true, "ownChannelOnly": true, "protectSecrets": true
+    },
+    "none": {
+      "rank": 0,
+      "categories": { "session": "allow", "discord": "allow", "*": "deny" },
+      "ownChannelOnly": true, "protectSecrets": true
+    }
+  }
+}

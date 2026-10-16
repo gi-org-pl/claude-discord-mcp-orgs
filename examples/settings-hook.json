@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun /path/to/claude-discord-mcp-orgs/hooks/pretooluse.ts",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

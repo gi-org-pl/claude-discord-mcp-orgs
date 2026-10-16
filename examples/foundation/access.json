@@ -1,0 +1,26 @@
+{
+  "_comment": "Example for a foundation with a board, team heads and volunteers. All ids are placeholders: set real Discord snowflakes with /discord:access in the terminal, never by copying this file over a live access.json.",
+  "dmPolicy": "allowlist",
+  "allowFrom": ["111111111111111111", "222222222222222222"],
+  "groups": {},
+  "pending": {},
+  "members": {
+    "111111111111111111": { "role": "board", "_who": "president (machine owner)" },
+    "222222222222222222": { "role": "board", "_who": "vice-president" },
+    "333333333333333333": { "role": "heads", "_who": "team head" },
+    "444444444444444444": { "role": "volunteer", "_who": "volunteer reviewer" }
+  },
+  "owners": ["111111111111111111"],
+  "guilds": {
+    "900000000000000000": {
+      "members": {
+        "111111111111111111": { "requireMention": false },
+        "222222222222222222": { "requireMention": true },
+        "333333333333333333": { "requireMention": true },
+        "444444444444444444": { "requireMention": true }
+      }
+    }
+  },
+  "ackReaction": "👀",
+  "noRoleNotice": true
+}
