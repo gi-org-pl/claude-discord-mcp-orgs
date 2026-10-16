@@ -275,3 +275,9 @@ describe('enforcement check (fail closed without the hook)', () => {
     }
   })
 })
+
+test('server instructions carry the request-marker and context rules', () => {
+  const text: string = fakes.mcp!.options.instructions
+  expect(text).toContain('[discord-request: <request_id>]')
+  expect(text).toContain('Tool limits do not cover what is already in your context')
+})
