@@ -35,3 +35,9 @@ test('transcript paths for the main thread and sub-agents', () => {
   const fromAgent = transcriptPaths(join('/p', 'proj', 'sess', 'subagents', 'agent-a1.jsonl'), 'sess', 'a1')
   expect(fromAgent.main).toBe(main)
 })
+
+test('without origin, a leading channel tag still marks a channel prompt (no fail-open)', () => {
+  const p = classify({ type: 'user', message: { content: '<channel source="plugin:discord:discord" request_id="dr_0123456789abcdef">\nhi\n</channel>' } })
+  expect(p).toEqual({ kind: 'channel', requestId: 'dr_0123456789abcdef', markers: [] })
+  expect(classify({ type: 'user', message: { content: 'plain text without origin' } })).toBeNull()
+})

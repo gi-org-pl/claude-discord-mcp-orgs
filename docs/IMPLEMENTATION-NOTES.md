@@ -131,3 +131,11 @@ Short log of how this fork was built. Newest entries at the bottom.
 - If the plugin is off, nothing arrives from Discord at all. If the upstream
   plugin runs instead of the fork, channel tags carry no `request_id` and
   the hook treats the session as lowest tier.
+
+## fix/transcript-origin-fallback
+
+- `origin.kind` is an internal transcript field. If it disappears, the hook
+  would see no channel prompts and pass everything (fail open). Fallback: a
+  user entry whose text starts with a `<channel source=...>` tag counts as a
+  channel prompt. Terminal prompts are then not recognised, so the operator
+  is restricted too (fail closed) until the parser is updated.
