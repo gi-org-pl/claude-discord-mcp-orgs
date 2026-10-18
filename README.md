@@ -1,3 +1,5 @@
+![claude-discord-mcp-orgs header](https://raw.githubusercontent.com/gi-org-pl/claude-discord-mcp-orgs/main/.github/image/header.png)
+
 # Discord channel for organisations (claude-discord-mcp-orgs)
 
 A fork of the official Discord channel plugin for Claude Code (0.0.4) for
